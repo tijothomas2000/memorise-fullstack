@@ -1,0 +1,80 @@
+// index.js
+import "dotenv/config";
+import express from "express";
+import cors from "cors";
+import helmet from "helmet";
+import morgan from "morgan";
+import rateLimit from "express-rate-limit";
+import mongoSanitize from "express-mongo-sanitize";
+import xss from "xss-clean";
+import compression from "compression";
+import { connectDB } from "./src/config/db.js";
+
+import authRoutes from "./src/routes/auth.js";
+import userRoutes from "./src/routes/users.js";
+import postRoutes from "./src/routes/posts.js";
+import trophyRoutes from "./src/routes/trophies.js";
+import reportRoutes from "./src/routes/reports.js";
+import adminRoutes from "./src/routes/admin.js";
+import billingRoutes from "./src/routes/billing.js";
+import fileRoutes from "./src/routes/files.js";
+import metaRoutes from "./src/routes/meta.js";
+
+const app = express();
+const PORT = process.env.PORT || 4000;
+
+app.set("trust proxy", 1);
+
+// Security & core middleware
+app.use(helmet());
+app.use(
+  cors({
+    origin: (origin, cb) => {
+      const allow = [
+        process.env.FRONTEND_ORIGIN,
+        "http://localhost:5173",
+      ].filter(Boolean);
+      if (!origin || allow.includes(origin)) return cb(null, true);
+      return cb(new Error("Not allowed by CORS"));
+    },
+    credentials: true,
+  })
+);
+app.use(express.json({ limit: "2mb" }));
+app.use(mongoSanitize());
+app.use(xss());
+app.use(compression());
+if (process.env.NODE_ENV !== "production") app.use(morgan("dev"));
+
+app.use(
+  rateLimit({ windowMs: 15 * 60 * 1000, max: 200, standardHeaders: true })
+);
+
+// Health
+app.get("/api/health", (_req, res) => res.json({ ok: true }));
+
+// Routes
+app.use("/api/auth", authRoutes);
+app.use("/api/meta", metaRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/posts", postRoutes);
+app.use("/api/trophies", trophyRoutes);
+app.use("/api/reports", reportRoutes);
+app.use("/api/admin", adminRoutes);
+app.use("/api/billing", billingRoutes);
+app.use("/api/files", fileRoutes);
+
+// 404 + error handler
+app.use((_req, res) => res.status(404).json({ error: "Not found" }));
+app.use((err, _req, res, _next) => {
+  console.error(err);
+  res.status(err.status || 500).json({ error: err.message || "Server error" });
+});
+
+// Start
+connectDB()
+  .then(() => app.listen(PORT, () => console.log(`API running on :${PORT}`)))
+  .catch((e) => {
+    console.error("DB connection failed:", e);
+    process.exit(1);
+  });
