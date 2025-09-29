@@ -1,6 +1,6 @@
 // src/pages/Login/Login.jsx
 import React, { useState } from "react";
-import login from "../../assets/images/login.jpg";
+import login from "../../assets/images/memrise.png";
 import { Link, useNavigate } from "react-router-dom";
 import api from "../../data/api";
 
@@ -110,12 +110,12 @@ export default function Login() {
                 <div className="row h-100">
                   <div className="col-md-6 h-100">
                     <div className="img-bx">
-                      <img src={login} alt="" className="img-fluid" />
+                      <img src={login} alt="" className="img-fluid" style={{objectFit:`contain`}}/>
                     </div>
                   </div>
                   <div className="col-md-6">
                     <div className="auth-form">
-                      <h4 className="main-title">Sign in</h4>
+                      <h4 className="main-title" style={{fontFamily:`poppins, sans-serif, sans-serif`}}>Sign in</h4>
 
                       {serverError && (
                         <div className="bg-danger text-white p-2 mb-3 rounded">
