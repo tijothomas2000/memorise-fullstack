@@ -13,14 +13,13 @@ import {
   Col,
   Card,
 } from "react-bootstrap";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import LightGallery from "lightgallery/react";
 import "lightgallery/css/lightgallery.css";
 import "lightgallery/css/lg-zoom.css";
 import "lightgallery/css/lg-thumbnail.css";
 import profile from "../../assets/images/profile/profile.png";
 import { IMAGES, SVGICON } from "../../data/constant/theme";
-import { useLocation } from "react-router-dom";
 
 const initialState = {
   sendMessage: false,
@@ -65,6 +64,21 @@ function UserPage() {
   // This makes the tabs controlled by activeTab state
   const cameraInputRef = useRef(null);
 
+  // ======= Camera capture: refs & state (NEW) =======
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const cameraStreamRef = useRef(null);
+
+  const [cameraError, setCameraError] = useState("");
+  const [cameraReady, setCameraReady] = useState(false);
+  const [capturedBlob, setCapturedBlob] = useState(null);
+  const [capturedPreview, setCapturedPreview] = useState(null);
+  const [cameraPostForm, setCameraPostForm] = useState({
+    title: "",
+    description: "",
+    category: "",
+  });
+
   // Cover
   const [coverPhoto, setCoverPhoto] = useState(null);
   const [coverPhotoPreview, setCoverPhotoPreview] = useState(null);
@@ -74,7 +88,8 @@ function UserPage() {
   const [avatarPreview, setAvatarPreview] = useState(null);
   const [avatarUrl, setAvatarUrl] = useState(null);
 
-  const [selectedTrophyCategory, setSelectedTrophyCategory] = useState("All");
+  const [selectedTrophyCategory, setSelectedTrophyCategory] =
+    useState("All");
 
   // Server data
   const [me, setMe] = useState(null);
@@ -111,7 +126,7 @@ function UserPage() {
   const [showPasswordForm, setShowPasswordForm] = useState(false);
   const [upgrading, setUpgrading] = useState(false);
 
-  // Post modal form
+  // Post modal form (existing upload flow)
   const [postForm, setPostForm] = useState({
     title: "",
     description: "",
@@ -121,6 +136,142 @@ function UserPage() {
 
   const onInit = () => { };
   const [state, dispatch] = useReducer(reducer, initialState);
+
+  // ======= Camera helpers (NEW) =======
+  const startCamera = async () => {
+    try {
+      setCameraError("");
+      setCapturedBlob(null);
+      if (capturedPreview) URL.revokeObjectURL(capturedPreview);
+      setCapturedPreview(null);
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" },
+        audio: false,
+      });
+      cameraStreamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+        setCameraReady(true);
+      }
+    } catch (e) {
+      setCameraError(e?.message || "Unable to access camera");
+      setCameraReady(false);
+    }
+  };
+
+  const stopCamera = () => {
+    try {
+      if (cameraStreamRef.current) {
+        cameraStreamRef.current.getTracks().forEach((t) => t.stop());
+        cameraStreamRef.current = null;
+      }
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
+      }
+    } catch {
+      // Ignore errors when stopping camera
+    }
+    setCameraReady(false);
+  };
+
+  const takeSnapshot = () => {
+    if (!videoRef.current || !canvasRef.current) return;
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const w = video.videoWidth || 1080;
+    const h = video.videoHeight || 1440;
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(video, 0, 0, w, h);
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) return;
+        setCapturedBlob(blob);
+        const url = URL.createObjectURL(blob);
+        setCapturedPreview(url);
+      },
+      "image/jpeg",
+      0.92
+    );
+  };
+
+  const resetCapture = () => {
+    setCapturedBlob(null);
+    if (capturedPreview) URL.revokeObjectURL(capturedPreview);
+    setCapturedPreview(null);
+  };
+
+  useEffect(() => {
+    if (state.camera) {
+      startCamera();
+    } else {
+      stopCamera();
+      resetCapture();
+      setCameraPostForm({ title: "", description: "", category: "" });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.camera]);
+
+  const handleCameraPostFormChange = (e) => {
+    const { name, value } = e.target;
+    setCameraPostForm((p) => ({ ...p, [name]: value }));
+  };
+
+  const handleCreateCameraPost = async (e) => {
+    e.preventDefault();
+    try {
+      if (!capturedBlob) return alert("Please capture a photo first");
+      if (!cameraPostForm.category) return alert("Please select a category");
+
+      const file = new File([capturedBlob], "camera_capture.jpg", {
+        type: "image/jpeg",
+      });
+
+      // 1) presign
+      const { data: presign } = await api.get("/posts/me/presign", {
+        params: { contentType: file.type, size: file.size },
+      });
+      if (!presign?.url || !presign?.key)
+        throw new Error("Failed to get upload URL");
+
+      // 2) PUT to S3
+      const headers = {
+        "Content-Type": file.type,
+        ...(presign.requiredHeaders || {}),
+      };
+      const putRes = await fetch(presign.url, {
+        method: "PUT",
+        headers,
+        body: file,
+      });
+      if (!putRes.ok) {
+        const errText = await putRes.text().catch(() => "");
+        throw new Error(
+          `S3 PUT failed: ${putRes.status} ${putRes.statusText}\n${errText}`
+        );
+      }
+
+      // 3) finalize
+      await api.post("/posts", {
+        title: cameraPostForm.title || "Camera Capture",
+        description: cameraPostForm.description || "",
+        category: cameraPostForm.category,
+        fileKey: presign.key,
+        fileMime: file.type,
+        fileSize: file.size,
+      });
+
+      // 4) cleanup + refresh
+      dispatch({ type: "cameraModal" });
+      await refreshPosts();
+    } catch (e) {
+      console.error(e);
+      alert(e?.response?.data?.error || e?.message || "Post failed");
+    }
+  };
 
   // helper to sign GET for any S3 key
   const signGet = async (key) => {
@@ -164,8 +315,7 @@ function UserPage() {
 
         // avatar/cover URLs
         if (meData.avatarUrl) setAvatarUrl(meData.avatarUrl);
-        else if (meData.avatarKey)
-          setAvatarUrl(await signGet(meData.avatarKey));
+        else if (meData.avatarKey) setAvatarUrl(await signGet(meData.avatarKey));
 
         if (meData.coverUrl) setCoverPhotoPreview(meData.coverUrl);
         else if (meData.coverKey) {
@@ -465,7 +615,7 @@ function UserPage() {
     }
   };
 
-  // Post modal helpers
+  // Post modal helpers (existing upload flow)
   const handlePostFormChange = (e) => {
     const { name, value, files } = e.target;
     if (name === "file")
@@ -473,7 +623,7 @@ function UserPage() {
     setPostForm((p) => ({ ...p, [name]: value }));
   };
 
-  // Create Post
+  // Create Post (existing upload flow)
   const handleCreatePost = async (e) => {
     e.preventDefault();
     try {
@@ -871,8 +1021,8 @@ function UserPage() {
                                             : "outline-secondary"
                                         }
                                         className={`cursor-pointer ${selectedTrophyCategory === category
-                                            ? ""
-                                            : "text-dark border"
+                                          ? ""
+                                          : "text-dark border"
                                           }`}
                                         style={{
                                           cursor: "pointer",
@@ -1067,9 +1217,7 @@ function UserPage() {
                                       }
                                     >
                                       <i
-                                        className={`fa ${editingProfile
-                                            ? "fa-times"
-                                            : "fa-edit"
+                                        className={`fa ${editingProfile ? "fa-times" : "fa-edit"
                                           } me-1`}
                                       ></i>
                                       {editingProfile
@@ -1333,9 +1481,7 @@ function UserPage() {
                                       }
                                     >
                                       <i
-                                        className={`fa ${showPasswordForm
-                                            ? "fa-times"
-                                            : "fa-key"
+                                        className={`fa ${showPasswordForm ? "fa-times" : "fa-key"
                                           } me-1`}
                                       ></i>
                                       {showPasswordForm
@@ -1688,7 +1834,7 @@ function UserPage() {
         </div>
       </Modal>
 
-      {/* Post Modal */}
+      {/* Post Modal (existing upload flow) */}
       <Modal
         show={state.post}
         className="modal fade"
@@ -1823,15 +1969,15 @@ function UserPage() {
                 <input
                   type="text"
                   className="form-control"
-                  value={`${window.location.origin}/profile/${me?.publicId || "profile"
-                    }`}
+                  value={`${window.location.origin
+                    }/profile/${me?.publicId || "profile"}`}
                   readOnly
                 />
                 <button
                   className="btn btn-outline-primary"
                   onClick={() => {
-                    const url = `${window.location.origin}/profile/${me?.publicId || "profile"
-                      }`;
+                    const url = `${window.location.origin
+                      }/profile/${me?.publicId || "profile"}`;
                     navigator.clipboard.writeText(url);
                     alert("Profile URL copied to clipboard!");
                   }}
@@ -1861,33 +2007,164 @@ function UserPage() {
         </div>
       </Modal>
 
-      {/* Camera Modal */}
+      {/* Camera Modal (NEW: capture → preview → details → post) */}
       <Modal
         show={state.camera}
         className="modal fade"
         id="cameraModal"
         onHide={() => dispatch({ type: "cameraModal" })}
         centered
+        size="lg"
       >
         <div className="modal-content">
           <div className="modal-header">
-            <h5 className="modal-title">Upload images</h5>
+            <h5 className="modal-title">
+              {capturedPreview ? "Preview & Details" : "Take a Photo"}
+            </h5>
             <button
               type="button"
               className="btn-close"
               onClick={() => dispatch({ type: "cameraModal" })}
             ></button>
           </div>
+
           <div className="modal-body">
-            <div className="input-group mb-3">
-              <span className="input-group-text">Upload</span>
-              <div className="form-file">
-                <input type="file" className="form-file-input" />
-              </div>
-            </div>
+            {/* Live camera view (if not captured yet) */}
+            {!capturedPreview && (
+              <>
+                {cameraError && (
+                  <div className="alert alert-danger mb-3">{cameraError}</div>
+                )}
+                <div className="ratio ratio-4x3 bg-dark rounded overflow-hidden mb-3">
+                  <video
+                    ref={videoRef}
+                    playsInline
+                    muted
+                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                  />
+                </div>
+                <div className="d-flex justify-content-center">
+                  <Button
+                    variant="primary"
+                    onClick={takeSnapshot}
+                    disabled={!cameraReady}
+                    className="px-4"
+                  >
+                    <i className="fa fa-camera me-2" /> Capture
+                  </Button>
+                </div>
+              </>
+            )}
+
+            {/* Preview + Details form */}
+            {capturedPreview && (
+              <Form onSubmit={handleCreateCameraPost}>
+                <div className="mb-3">
+                  <img
+                    src={capturedPreview}
+                    alt="Captured"
+                    className="img-fluid rounded w-100"
+                    style={{
+                      maxHeight: 420,
+                      objectFit: "contain",
+                      background: "#000",
+                    }}
+                  />
+                </div>
+
+                <Row className="g-3">
+                  <Col md={6}>
+                    <Form.Group>
+                      <Form.Label>Title</Form.Label>
+                      <Form.Control
+                        name="title"
+                        value={cameraPostForm.title}
+                        onChange={handleCameraPostFormChange}
+                        placeholder="e.g., Internship Offer Letter"
+                      />
+                    </Form.Group>
+                  </Col>
+                  <Col md={6}>
+                    <Form.Group>
+                      <Form.Label>Category</Form.Label>
+                      <Form.Select
+                        name="category"
+                        value={cameraPostForm.category}
+                        onChange={handleCameraPostFormChange}
+                        required
+                      >
+                        <option value="">Select a category…</option>
+                        {categories.map((c) => (
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
+                        ))}
+                      </Form.Select>
+                    </Form.Group>
+                  </Col>
+                </Row>
+
+                <Form.Group className="mt-3">
+                  <Form.Label>Description</Form.Label>
+                  <Form.Control
+                    as="textarea"
+                    rows={3}
+                    name="description"
+                    value={cameraPostForm.description}
+                    onChange={handleCameraPostFormChange}
+                    placeholder="Describe this certificate/achievement…"
+                  />
+                </Form.Group>
+
+                <div className="d-flex justify-content-between mt-4">
+                  <div>
+                    <Button
+                      variant="outline-secondary"
+                      type="button"
+                      onClick={() => {
+                        resetCapture();
+                      }}
+                      className="me-2"
+                    >
+                      <i className="fa fa-undo me-1" />
+                      Retake
+                    </Button>
+                    <Button
+                      variant="outline-danger"
+                      type="button"
+                      onClick={() => {
+                        resetCapture();
+                        stopCamera();
+                        startCamera();
+                      }}
+                    >
+                      <i className="fa fa-refresh me-1" />
+                      Reset Camera
+                    </Button>
+                  </div>
+                  <div>
+                    <Button
+                      variant="secondary"
+                      className="me-2"
+                      type="button"
+                      onClick={() => dispatch({ type: "cameraModal" })}
+                    >
+                      Cancel
+                    </Button>
+                    <Button variant="primary" type="submit">
+                      Post
+                    </Button>
+                  </div>
+                </div>
+              </Form>
+            )}
           </div>
+
+          {/* hidden canvas for capture */}
+          <canvas ref={canvasRef} style={{ display: "none" }} />
         </div>
       </Modal>
+
 
       {/* Reply Modal */}
       <Modal
