@@ -1,4 +1,4 @@
-// src/pages/Login/Login.jsx memorise
+// src/pages/Login/Login.jsx
 import React, { useState } from "react";
 import login from "../../assets/images/memrise.png";
 import { Link, useNavigate } from "react-router-dom";
