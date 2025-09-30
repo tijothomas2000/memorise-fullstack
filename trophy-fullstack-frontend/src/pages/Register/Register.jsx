@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import logo from "../../assets/images/logo/logo-full.png";
+import logo from "../../assets/images/memrise.png";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import api from "../../data/api";
 
@@ -88,7 +88,7 @@ const Register = () => {
                 <div className="row no-gutters">
                   <div className="col-xl-12">
                     <div className="auth-form">
-                      <div className="text-center mb-3">
+                      <div className="text-center flex self-center justify-center mb-3">
                         <Link to="#">
                           <img src={logo} alt="logo" />
                         </Link>
