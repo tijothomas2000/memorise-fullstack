@@ -34,6 +34,7 @@ app.use(
         process.env.FRONTEND_ORIGIN,
         "http://localhost:5173",
         "https://memorise.narithookilautospa.com",
+        "https://memorise-fullstack.vercel.app",
       ].filter(Boolean);
       if (!origin || allow.includes(origin)) return cb(null, true);
       return cb(new Error("Not allowed by CORS"));
