@@ -33,6 +33,7 @@ app.use(
       const allow = [
         process.env.FRONTEND_ORIGIN,
         "http://localhost:5173",
+        "https://memorise.narithookilautospa.com",
       ].filter(Boolean);
       if (!origin || allow.includes(origin)) return cb(null, true);
       return cb(new Error("Not allowed by CORS"));
