@@ -30,19 +30,11 @@ app.set("trust proxy", 1);
 app.use(helmet());
 app.use(
   cors({
-    origin: (origin, cb) => {
-      const allow = [
-        process.env.FRONTEND_ORIGIN,
-        "http://localhost:5173",
-        "https://memorise.narithookilautospa.com",
-        "https://memorise-fullstack.vercel.app",
-      ].filter(Boolean);
-      if (!origin || allow.includes(origin)) return cb(null, true);
-      return cb(new Error("Not allowed by CORS"));
-    },
-    credentials: true,
+    origin: "*", // Allow all origins
+    credentials: true, // ❌ Note: This doesn't work with "*" (see below)
   })
 );
+
 app.use(express.json({ limit: "2mb" }));
 app.use(mongoSanitize());
 app.use(xss());
