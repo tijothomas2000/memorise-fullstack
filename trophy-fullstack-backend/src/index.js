@@ -21,8 +21,8 @@ import fileRoutes from "./routes/files.js";
 import metaRoutes from "./routes/meta.js";
 
 const app = express();
-const PORT = process.env.PORT || 4061;
-app.listen(PORT, "0.0.0.0", () => console.log(`API running on :${PORT}`));
+const PORT = process.env.PORT || 4060;
+// app.listen(PORT, "0.0.0.0", () => console.log(`API running on :${PORT}`));
 
 app.set("trust proxy", 1);
 
@@ -76,7 +76,9 @@ app.use((err, _req, res, _next) => {
 
 // Start
 connectDB()
-  .then(() => app.listen(PORT, () => console.log(`API running on :${PORT}`)))
+  .then(() =>
+    app.listen(PORT, "0.0.0.0", () => console.log(`API running on :${PORT}`))
+  )
   .catch((e) => {
     console.error("DB connection failed:", e);
     process.exit(1);
