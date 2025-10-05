@@ -22,6 +22,7 @@ import metaRoutes from "./routes/meta.js";
 
 const app = express();
 const PORT = process.env.PORT || 4000;
+app.listen(PORT, "0.0.0.0", () => console.log(`API running on :${PORT}`));
 
 app.set("trust proxy", 1);
 
